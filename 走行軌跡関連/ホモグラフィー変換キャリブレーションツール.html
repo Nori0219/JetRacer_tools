@@ -572,6 +572,14 @@ destination_points = np.float32(${dstPointsStr})
 # 【推奨】8点全ての情報から、最も精度の高いホモグラフィー行列を計算
 # RANSACアルゴリズムにより、クリック誤差など外れ値に対する耐性も向上します。
 homography_matrix, status = cv2.findHomography(source_points, destination_points)
+# --- 計算結果の出力 ---
+print("■ ホモグラフィー行列 (GUIツールに貼り付けてください):")
+    print(homography_matrix)
+    print("\n■ 出力サイズ (GUIツールに入力してください):")
+    output_width = destination_points[1][0]
+    output_height = destination_points[2][1]
+    print(f"幅: {int(output_width)}")
+    print(f"高さ: {int(output_height)}")
 
 # 例: 鳥瞰図への変換
 # output_width = ${Math.round(dst[1].x)}
