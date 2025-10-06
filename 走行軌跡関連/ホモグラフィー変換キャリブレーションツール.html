@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ホモグラフィー変換 キャリブレーションツール</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .canvas-container { position: relative; }
+        #sourceCanvas.magnify-active { cursor: none; }
+        .point-marker {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            background-color: rgba(255, 0, 0, 0.7);
+            border: 2px solid red;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 12px;
+            pointer-events: none;
+        }
+        .auto-point-marker {
+             position: absolute;
+             width: 8px;
+             height: 8px;
+             background-color: rgba(0, 255, 0, 0.7);
+             border: 1px solid green;
+             border-radius: 50%;
+             transform: translate(-50%, -50%);
+             pointer-events: none;
+        }
+        .magnifier-glass {
+            position: absolute;
+            border: 3px solid #1f2937;
+            border-radius: 50%;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+            width: 150px;
+            height: 150px;
+            display: none;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+
+    <div class="container mx-auto p-4 md:p-8">
+        <header class="text-center mb-8">
+            <h1 class="text-3xl md:text-4xl font-bold text-gray-900">ホモグラフィー変換 キャリブレーションツール</h1>
+            <p class="mt-2 text-lg text-gray-600">斜めからの映像を真上からの鳥瞰図に変換します</p>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <!-- Controls Column -->
+            <div class="lg:col-span-1 bg-white p-6 rounded-lg shadow-lg">
+                <h2 class="text-2xl font-bold mb-4 border-b pb-2">設定 & 操作パネル</h2>
+                
+                <div class="space-y-6">
+                    <div>
+                        <h3 class="text-lg font-semibold mb-2 text-gray-700">ステップ1: モード選択</h3>
+                        <div class="flex rounded-md shadow-sm">
+                            <button id="manualModeBtn" class="flex-1 py-2 px-4 bg-indigo-600 text-white rounded-l-md focus:z-10 focus:ring-2 focus:ring-indigo-500">手動 (8点)</button>
+                            <button id="autoModeBtn" class="flex-1 py-2 px-4 bg-white text-gray-700 rounded-r-md hover:bg-gray-50 focus:z-10 focus:ring-2 focus:ring-indigo-500">自動 (チェスボード)</button>
+                        </div>
+                    </div>
+
+                    <div>
+                        <h3 class="text-lg font-semibold mb-2 text-gray-700">ステップ2: キャリブレーション画像</h3>
+                        <input type="file" id="imageLoader" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"/>
+                        <p class="text-xs text-gray-500 mt-1">床のタイルが写った画像をアップロードしてください。</p>
+                    </div>
+
+                    <div id="physicalDef">
+                        <h3 class="text-lg font-semibold mb-2 text-gray-700">ステップ3: 物理空間の定義</h3>
+                        <div id="manualInputs">
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label for="tileWidth" class="block text-sm font-medium text-gray-700">横のタイル数</label>
+                                    <input type="number" id="tileWidth" value="11" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
+                                </div>
+                                <div>
+                                    <label for="tileHeight" class="block text-sm font-medium text-gray-700">縦のタイル数</label>
+                                    <input type="number" id="tileHeight" value="17" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
+                                </div>
+                            </div>
+                        </div>
+                        <div id="autoInputs" class="hidden">
+                             <p class="text-xs text-gray-500 mb-2">検出したいパターンの<strong class="font-bold">内側の角の数</strong>を入力してください。</p>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label for="patternWidth" class="block text-sm font-medium text-gray-700">横の角の数</label>
+                                    <input type="number" id="patternWidth" value="10" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
+                                </div>
+                                <div>
+                                    <label for="patternHeight" class="block text-sm font-medium text-gray-700">縦の角の数</label>
+                                    <input type="number" id="patternHeight" value="16" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
+                                </div>
+                            </div>
+                        </div>
+                         <div class="mt-4">
+                            <label for="tileSize" class="block text-sm font-medium text-gray-700">タイル1枚の辺の長さ (cm)</label>
+                            <input type="number" id="tileSize" value="50" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
+                        </div>
+                    </div>
+
+                    <div>
+                        <h3 class="text-lg font-semibold mb-2 text-gray-700">ステップ4: 対応点の選択</h3>
+                        <p id="instruction" class="text-sm text-blue-600 bg-blue-50 p-3 rounded-md"></p>
+                        <div id="pointsList" class="mt-2 text-sm space-y-1"></div>
+                        <button id="resetButton" class="mt-4 w-full bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg transition duration-300 disabled:bg-gray-400" disabled>リセット</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Canvases and Output Column -->
+            <div class="lg:col-span-2 space-y-8">
+                <div class="bg-white p-6 rounded-lg shadow-lg">
+                    <h2 class="text-2xl font-bold mb-4">入力画像 (クリックして点を選択)</h2>
+                    <div id="canvasContainer" class="canvas-container bg-gray-200 rounded-md overflow-hidden aspect-video flex items-center justify-center">
+                        <canvas id="sourceCanvas"></canvas>
+                        <div id="magnifier" class="magnifier-glass"></div>
+                    </div>
+                </div>
+                <div class="bg-white p-6 rounded-lg shadow-lg">
+                    <h2 class="text-2xl font-bold mb-4">出力プレビュー (鳥瞰図)</h2>
+                    <div class="bg-gray-200 rounded-md overflow-hidden aspect-video flex items-center justify-center">
+                        <canvas id="destCanvas"></canvas>
+                    </div>
+                </div>
+
+                <div class="bg-white p-6 rounded-lg shadow-lg">
+                    <h2 class="text-2xl font-bold mb-4">Python (OpenCV) 用コード出力</h2>
+                    <p class="text-sm text-gray-600 mb-2">以下の値をコピーして、お使いのプログラムに貼り付けてください。</p>
+                    <div class="relative">
+                        <pre id="outputCode" class="bg-gray-900 text-white p-4 rounded-md text-sm whitespace-pre-wrap overflow-x-auto"></pre>
+                        <button id="copyButton" class="absolute top-2 right-2 bg-gray-700 hover:bg-gray-600 text-white text-xs font-bold py-1 px-2 rounded">Copy</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // DOM Elements
+        const imageLoader = document.getElementById('imageLoader');
+        const sourceCanvas = document.getElementById('sourceCanvas');
+        const destCanvas = document.getElementById('destCanvas');
+        const canvasContainer = document.getElementById('canvasContainer');
+        const pointsList = document.getElementById('pointsList');
+        const resetButton = document.getElementById('resetButton');
+        const copyButton = document.getElementById('copyButton');
+        const outputCode = document.getElementById('outputCode');
+        const instruction = document.getElementById('instruction');
+        const magnifier = document.getElementById('magnifier');
+        const tileWidthInput = document.getElementById('tileWidth');
+        const tileHeightInput = document.getElementById('tileHeight');
+        const tileSizeInput = document.getElementById('tileSize');
+        const manualModeBtn = document.getElementById('manualModeBtn');
+        const autoModeBtn = document.getElementById('autoModeBtn');
+        const manualInputs = document.getElementById('manualInputs');
+        const autoInputs = document.getElementById('autoInputs');
+        const patternWidthInput = document.getElementById('patternWidth');
+        const patternHeightInput = document.getElementById('patternHeight');
+
+        // State
+        let sourcePoints = [];
+        let originalImage = null;
+        let imageFileName = '';
+        let currentMode = 'manual'; // 'manual' or 'auto'
+        const zoomLevel = 3; 
+
+        // Canvas contexts
+        const sourceCtx = sourceCanvas.getContext('2d', { willReadFrequently: true });
+        const destCtx = destCanvas.getContext('2d');
+
+        // --- Initial Setup ---
+        switchMode('manual');
+
+        // --- Event Listeners ---
+        manualModeBtn.addEventListener('click', () => switchMode('manual'));
+        autoModeBtn.addEventListener('click', () => switchMode('auto'));
+        imageLoader.addEventListener('change', handleImage, false);
+        sourceCanvas.addEventListener('click', handleCanvasClick);
+        sourceCanvas.addEventListener('mousemove', moveMagnifier);
+        sourceCanvas.addEventListener('mouseenter', () => { if(originalImage) magnifier.style.display = 'block'; });
+        sourceCanvas.addEventListener('mouseleave', () => magnifier.style.display = 'none');
+        resetButton.addEventListener('click', reset);
+        copyButton.addEventListener('click', copyToClipboard);
+        [tileWidthInput, tileHeightInput, tileSizeInput, patternWidthInput, patternHeightInput].forEach(input => {
+            input.addEventListener('change', processAndDisplay);
+        });
+
+        function switchMode(mode) {
+            currentMode = mode;
+            if (mode === 'manual') {
+                manualModeBtn.classList.add('bg-indigo-600', 'text-white');
+                manualModeBtn.classList.remove('bg-white', 'text-gray-700');
+                autoModeBtn.classList.add('bg-white', 'text-gray-700');
+                autoModeBtn.classList.remove('bg-indigo-600', 'text-white');
+                manualInputs.classList.remove('hidden');
+                autoInputs.classList.add('hidden');
+            } else { // auto
+                autoModeBtn.classList.add('bg-indigo-600', 'text-white');
+                autoModeBtn.classList.remove('bg-white', 'text-gray-700');
+                manualModeBtn.classList.add('bg-white', 'text-gray-700');
+                manualModeBtn.classList.remove('bg-indigo-600', 'text-white');
+                autoInputs.classList.remove('hidden');
+                manualInputs.classList.add('hidden');
+            }
+            reset();
+        }
+
+        function updateInstructions() {
+            if (currentMode === 'manual') {
+                const pointNames = ['左上角', '右上角', '右下角', '左下角', '上辺中央', '右辺中央', '下辺中央', '左辺中央'];
+                const nextPointName = pointNames[sourcePoints.length];
+                if(sourcePoints.length < 8) {
+                    instruction.innerHTML = `次に<strong class="font-bold">${nextPointName}</strong>をクリックしてください。`;
+                } else {
+                    instruction.textContent = '8点の選択が完了しました。';
+                    instruction.classList.remove('text-blue-600', 'bg-blue-50');
+                    instruction.classList.add('text-green-600', 'bg-green-50');
+                }
+            } else { // auto
+                const pointNames = ['チェスボードエリアの左上', '右上', '右下', '左下'];
+                 if (sourcePoints.length < 4) {
+                    const nextPointName = pointNames[sourcePoints.length];
+                    instruction.innerHTML = `次に<strong class="font-bold">${nextPointName}</strong>の角をクリックしてください。`;
+                 } else {
+                    instruction.textContent = 'エリアの四隅の選択が完了しました。';
+                    instruction.classList.remove('text-blue-600', 'bg-blue-50');
+                    instruction.classList.add('text-green-600', 'bg-green-50');
+                 }
+            }
+        }
+
+        function handleImage(e) {
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                originalImage = new Image();
+                originalImage.onload = function() {
+                    reset();
+                    drawImageToCanvas(originalImage, sourceCanvas);
+                    setupMagnifier();
+                    resetButton.disabled = false;
+                    sourceCanvas.classList.add('magnify-active');
+                }
+                originalImage.src = event.target.result;
+            }
+            if (e.target.files[0]) {
+                imageFileName = e.target.files[0].name;
+                reader.readAsDataURL(e.target.files[0]);
+            }
+        }
+
+        function setupMagnifier() {
+            magnifier.style.backgroundImage = `url('${originalImage.src}')`;
+            const bgSizeW = sourceCanvas.width * zoomLevel;
+            const bgSizeH = sourceCanvas.height * zoomLevel;
+            magnifier.style.backgroundSize = `${bgSizeW}px ${bgSizeH}px`;
+        }
+
+        function moveMagnifier(e) {
+            if (!originalImage) return;
+            const rect = sourceCanvas.getBoundingClientRect();
+            const containerRect = canvasContainer.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            const magnifierX = e.clientX - containerRect.left - magnifier.offsetWidth / 2;
+            const magnifierY = e.clientY - containerRect.top - magnifier.offsetHeight / 2;
+            magnifier.style.left = `${magnifierX}px`;
+            magnifier.style.top = `${magnifierY}px`;
+            const scaleX = sourceCanvas.width / rect.width;
+            const scaleY = sourceCanvas.height / rect.height;
+            const bgX = -((x * scaleX * zoomLevel) - magnifier.offsetWidth / 2);
+            const bgY = -((y * scaleY * zoomLevel) - magnifier.offsetHeight / 2);
+            magnifier.style.backgroundPosition = `${bgX}px ${bgY}px`;
+        }
+
+        function handleCanvasClick(e) {
+            const MAX_POINTS = (currentMode === 'manual') ? 8 : 4;
+            if (sourcePoints.length >= MAX_POINTS || !originalImage) return;
+
+            const rect = sourceCanvas.getBoundingClientRect();
+            const scaleX = sourceCanvas.width / rect.width;
+            const scaleY = sourceCanvas.height / rect.height;
+            const x = (e.clientX - rect.left) * scaleX;
+            const y = (e.clientY - rect.top) * scaleY;
+
+            sourcePoints.push({ x, y });
+            updatePointsUI();
+            drawPointsOnCanvas();
+            updateInstructions();
+
+            if (sourcePoints.length === MAX_POINTS) {
+                processAndDisplay();
+            }
+        }
+        
+        function processAndDisplay() {
+            if (!originalImage) return;
+            
+            if (currentMode === 'manual' && sourcePoints.length === 8) {
+                const destPoints = getManualDestinationPoints();
+                const previewSrcPoints = sourcePoints.slice(0, 4);
+                const previewDstPoints = destPoints.slice(0, 4);
+                const homographyMatrix = computeHomography(previewSrcPoints, previewDstPoints);
+                if (homographyMatrix) {
+                    applyHomography(homographyMatrix);
+                    generateManualOutputCode(sourcePoints, destPoints);
+                }
+            } else if (currentMode === 'auto' && sourcePoints.length === 4) {
+                const allPoints = calculateAutoPoints();
+                const homographyMatrix = computeHomography(sourcePoints, allPoints.destCorners);
+                if (homographyMatrix) {
+                    applyHomography(homographyMatrix);
+                    drawPointsOnCanvas(allPoints.src); // Draw all auto points
+                    generateAutoOutputCode(allPoints.src, allPoints.dest);
+                }
+            }
+        }
+
+        function reset() {
+            sourcePoints = [];
+            if (originalImage) {
+                drawImageToCanvas(originalImage, sourceCanvas);
+            } else {
+                sourceCtx.clearRect(0, 0, sourceCanvas.width, sourceCanvas.height);
+            }
+            destCtx.clearRect(0, 0, destCanvas.width, destCanvas.height);
+            
+            const markers = canvasContainer.querySelectorAll('.point-marker, .auto-point-marker');
+            markers.forEach(marker => marker.remove());
+            
+            magnifier.style.display = 'none';
+            sourceCanvas.classList.remove('magnify-active');
+
+            pointsList.innerHTML = '';
+            outputCode.textContent = '# 対応点を選択するとここにコードが出力されます';
+            
+            if (currentMode === 'manual') {
+                instruction.innerHTML = `画像をアップロード後、<strong class="font-bold">四隅と各辺の中央、合計8点</strong>をクリックしてください。<br>順番: 左上→右上→右下→左下→上辺→右辺→下辺→左辺`;
+            } else {
+                instruction.innerHTML = `画像をアップロード後、チェスボードパターンを含む<strong class="font-bold">エリア全体の四隅</strong>をクリックしてください。<br>順番: 左上→右上→右下→左下`;
+            }
+            instruction.classList.add('text-blue-600', 'bg-blue-50');
+            instruction.classList.remove('text-green-600', 'bg-green-50');
+            resetButton.disabled = !originalImage;
+        }
+
+        function copyToClipboard() {
+            navigator.clipboard.writeText(outputCode.textContent).then(() => {
+                const originalText = copyButton.textContent;
+                copyButton.textContent = 'Copied!';
+                setTimeout(() => { copyButton.textContent = originalText; }, 2000);
+            });
+        }
+
+        function drawImageToCanvas(img, canvas) {
+            const container = canvas.parentElement;
+            const containerWidth = container.clientWidth;
+            const containerHeight = container.clientHeight;
+            const imgAspectRatio = img.width / img.height;
+            const containerAspectRatio = containerWidth / containerHeight;
+            let canvasWidth, canvasHeight;
+            if (imgAspectRatio > containerAspectRatio) {
+                canvasWidth = containerWidth;
+                canvasHeight = containerWidth / imgAspectRatio;
+            } else {
+                canvasHeight = containerHeight;
+                canvasWidth = containerHeight * imgAspectRatio;
+            }
+            canvas.width = img.width;
+            canvas.height = img.height;
+            canvas.style.width = `${canvasWidth}px`;
+            canvas.style.height = `${canvasHeight}px`;
+            canvas.getContext('2d').drawImage(img, 0, 0, img.width, img.height);
+        }
+
+        function updatePointsUI() {
+            const manualNames = ['左上角', '右上角', '右下角', '左下角', '上辺中央', '右辺中央', '下辺中央', '左辺中央'];
+            const autoNames = ['エリア左上', 'エリア右上', 'エリア右下', 'エリア左下'];
+            const pointNames = (currentMode === 'manual') ? manualNames : autoNames;
+            pointsList.innerHTML = sourcePoints.map((p, i) => {
+                return `<div class="p-2 bg-gray-50 rounded-md"><strong>${pointNames[i]}:</strong> (${Math.round(p.x)}, ${Math.round(p.y)})</div>`;
+            }).join('');
+        }
+
+        function drawPointsOnCanvas(pointsToDraw = sourcePoints) {
+            const markers = canvasContainer.querySelectorAll('.point-marker, .auto-point-marker');
+            markers.forEach(marker => marker.remove());
+            
+            pointsToDraw.forEach((p, i) => {
+                const isManualPoint = sourcePoints.includes(p);
+                const marker = document.createElement('div');
+                marker.className = isManualPoint ? 'point-marker' : 'auto-point-marker';
+                if(isManualPoint) marker.textContent = sourcePoints.indexOf(p) + 1;
+                
+                const rect = sourceCanvas.getBoundingClientRect();
+                const containerRect = canvasContainer.getBoundingClientRect();
+                const scaleX = rect.width / sourceCanvas.width;
+                const scaleY = rect.height / sourceCanvas.height;
+                const canvasOffsetX = rect.left - containerRect.left;
+                const canvasOffsetY = rect.top - containerRect.top;
+                
+                marker.style.left = `${canvasOffsetX + p.x * scaleX}px`;
+                marker.style.top = `${canvasOffsetY + p.y * scaleY}px`;
+                
+                canvasContainer.appendChild(marker);
+            });
+        }
+        
+        // --- Destination Point Calculation ---
+        function getManualDestinationPoints() {
+            const tileWCount = parseFloat(tileWidthInput.value);
+            const tileHCount = parseFloat(tileHeightInput.value);
+            const tileSize = parseFloat(tileSizeInput.value);
+            const physicalWidth = tileWCount * tileSize;
+            const physicalHeight = tileHCount * tileSize;
+            const aspectRatio = physicalWidth / physicalHeight;
+            const destCanvasWidth = 800;
+            const destCanvasHeight = destCanvasWidth / aspectRatio;
+            destCanvas.width = destCanvasWidth;
+            destCanvas.height = destCanvasHeight;
+            destCanvas.style.cssText = `width: auto; height: auto; max-width: 100%; max-height: 100%;`;
+            return [
+                {x: 0, y: 0}, {x: destCanvasWidth, y: 0}, {x: destCanvasWidth, y: destCanvasHeight}, {x: 0, y: destCanvasHeight},
+                {x: destCanvasWidth / 2, y: 0}, {x: destCanvasWidth, y: destCanvasHeight / 2},
+                {x: destCanvasWidth / 2, y: destCanvasHeight}, {x: 0, y: destCanvasHeight / 2}
+            ];
+        }
+
+        function calculateAutoPoints() {
+            const patternW = parseInt(patternWidthInput.value);
+            const patternH = parseInt(patternHeightInput.value);
+            const tileSize = parseFloat(tileSizeInput.value);
+
+            // The 4 clicked corners correspond to a physical rectangle
+            const physicalWidth = (patternW + 1) * tileSize;
+            const physicalHeight = (patternH + 1) * tileSize;
+            
+            const destCorners = [ {x: 0, y: 0}, {x: physicalWidth, y: 0}, {x: physicalWidth, y: physicalHeight}, {x: 0, y: physicalHeight} ];
+            const homographyToPhy = computeHomography(sourcePoints, destCorners);
+            if (!homographyToPhy) return null;
+            const phyToHomography = invert(homographyToPhy);
+            if (!phyToHomography) return null;
+
+            const allSrcPoints = [];
+            const allDestPoints = [];
+
+            for (let j = 0; j < patternH; j++) {
+                for (let i = 0; i < patternW; i++) {
+                    const physicalX = (i + 1) * tileSize;
+                    const physicalY = (j + 1) * tileSize;
+                    allDestPoints.push({ x: physicalX, y: physicalY });
+
+                    const [srcX, srcY, _] = transform(phyToHomography, physicalX, physicalY);
+                    allSrcPoints.push({ x: srcX, y: srcY });
+                }
+            }
+            return { src: allSrcPoints, dest: allDestPoints, destCorners: destCorners.map(p => ({x:p.x,y:p.y}))};
+        }
+
+
+        // --- Homography Logic (simplified for browser preview) ---
+        function computeHomography(src, dst) {
+            if (src.length < 4 || dst.length < 4) return null;
+            const src4 = src.slice(0, 4);
+            const dst4 = dst.slice(0, 4);
+            const a = [];
+            for (let i = 0; i < 4; i++) {
+                a.push([src4[i].x, src4[i].y, 1, 0, 0, 0, -src4[i].x * dst4[i].x, -src4[i].y * dst4[i].x]);
+                a.push([0, 0, 0, src4[i].x, src4[i].y, 1, -src4[i].x * dst4[i].y, -src4[i].y * dst4[i].y]);
+            }
+            const b = [];
+            for (let i = 0; i < 4; i++) {
+                b.push(dst4[i].x);
+                b.push(dst4[i].y);
+            }
+            const h = solve(a, b);
+            if (!h) return null;
+            return [ h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7], 1 ];
+        }
+        
+        function solve(A, b) {
+            const n = 8; // DLT for homography
+            // This is a simplified Gaussian elimination, for a more robust solution, a library like numeric.js would be better
+            for (let i = 0; i < n; i++) {
+                let maxEl = Math.abs(A[i][i]);
+                let maxRow = i;
+                for (let k = i + 1; k < n; k++) if (Math.abs(A[k][i]) > maxEl) { maxEl = Math.abs(A[k][i]); maxRow = k; }
+                [A[maxRow], A[i]] = [A[i], A[maxRow]];
+                [b[maxRow], b[i]] = [b[i], b[maxRow]];
+                for (let k = i + 1; k < n; k++) {
+                    const c = -A[k][i] / A[i][i];
+                    for (let j = i; j < n; j++) { if (i === j) A[k][j] = 0; else A[k][j] += c * A[i][j]; }
+                    b[k] += c * b[i];
+                }
+            }
+            const x = Array(n).fill(0);
+            for (let i = n - 1; i > -1; i--) {
+                if(Math.abs(A[i][i]) < 1e-9) return null; // Avoid division by zero
+                x[i] = b[i] / A[i][i];
+                for (let k = i - 1; k > -1; k--) b[k] -= A[k][i] * x[i];
+            }
+            return x;
+        }
+
+        function applyHomography(matrix) {
+            const invMatrix = invert(matrix);
+            if (!invMatrix) return;
+            const destPoints = getManualDestinationPoints(); // Use manual dest for canvas sizing
+            const srcData = sourceCtx.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
+            const dstData = destCtx.createImageData(destCanvas.width, destCanvas.height);
+            const srcW = srcData.width, srcH = srcData.height, dstW = dstData.width, dstH = dstData.height;
+            for (let y = 0; y < dstH; y++) {
+                for (let x = 0; x < dstW; x++) {
+                    const [sx, sy, _] = transform(invMatrix, x, y);
+                    const srcX = Math.round(sx), srcY = Math.round(sy);
+                    if (srcX >= 0 && srcX < srcW && srcY >= 0 && srcY < srcH) {
+                        const srcIndex = (srcY * srcW + srcX) * 4;
+                        const dstIndex = (y * dstW + x) * 4;
+                        dstData.data.set(srcData.data.subarray(srcIndex, srcIndex + 4), dstIndex);
+                    }
+                }
+            }
+            destCtx.putImageData(dstData, 0, 0);
+        }
+        
+        function transform(m, x, y) {
+            const z = m[6] * x + m[7] * y + m[8];
+            if (Math.abs(z) < 1e-9) return [0, 0, 0];
+            return [(m[0] * x + m[1] * y + m[2]) / z, (m[3] * x + m[4] * y + m[5]) / z, z];
+        }
+
+        function invert(m) {
+            const det = m[0]*(m[4]*m[8]-m[7]*m[5])-m[1]*(m[3]*m[8]-m[5]*m[6])+m[2]*(m[3]*m[7]-m[4]*m[6]);
+            if (det === 0) return null;
+            const invDet = 1 / det;
+            return [
+                (m[4]*m[8]-m[7]*m[5])*invDet, (m[2]*m[7]-m[1]*m[8])*invDet, (m[1]*m[5]-m[2]*m[4])*invDet,
+                (m[5]*m[6]-m[3]*m[8])*invDet, (m[0]*m[8]-m[2]*m[6])*invDet, (m[3]*m[2]-m[0]*m[5])*invDet,
+                (m[3]*m[7]-m[6]*m[4])*invDet, (m[6]*m[1]-m[0]*m[7])*invDet, (m[0]*m[4]-m[3]*m[1])*invDet
+            ];
+        }
+        
+        // --- Code Generation ---
+        function generateManualOutputCode(src, dst) {
+            const srcPointsStr = '[\n' + src.map(p => `        [${Math.round(p.x)}, ${Math.round(p.y)}]`).join(',\n') + '\n    ]';
+            const dstPointsList = [
+                [0,0], [dst[1].x,0], [dst[2].x,dst[2].y], [0,dst[3].y],
+                [dst[4].x,0], [dst[5].x,dst[5].y], [dst[6].x,dst[6].y], [0,dst[7].y]
+            ];
+             const dstPointsStr = '[\n' + dstPointsList.map(p => `        [${p[0].toFixed(2)}, ${p[1].toFixed(2)}]`).join(',\n') + '\n    ]';
+
+            outputCode.textContent = `# 画像 '${imageFileName}' からのキャリブレーション結果 (手動8点)
+import numpy as np
+import cv2
+
+# 元画像上のピクセル座標 (左上角→右上角→右下角→左下角→上辺中央→右辺中央→下辺中央→左辺中央)
+source_points = np.float32(${srcPointsStr})
+
+# 対応する出力画像上の座標
+# この座標は物理的なアスペクト比を維持しています。
+destination_points = np.float32(${dstPointsStr})
+
+# 【推奨】8点全ての情報から、最も精度の高いホモグラフィー行列を計算
+# RANSACアルゴリズムにより、クリック誤差など外れ値に対する耐性も向上します。
+homography_matrix, status = cv2.findHomography(source_points, destination_points)
+
+# 例: 鳥瞰図への変換
+# output_width = ${Math.round(dst[1].x)}
+# output_height = ${Math.round(dst[2].y)}
+# bird_eye_view = cv2.warpPerspective(original_image, homography_matrix, (output_width, output_height))
+`;
+        }
+
+        function generateAutoOutputCode(src, dst) {
+            const srcPointsStr = '[\n' + src.map(p => `        [${p.x.toFixed(2)}, ${p.y.toFixed(2)}]`).join(',\n') + '\n    ]';
+            const dstPointsStr = '[\n' + dst.map(p => `        [${p.x.toFixed(2)}, ${p.y.toFixed(2)}]`).join(',\n') + '\n    ]';
+            const patternW = parseInt(patternWidthInput.value);
+            const patternH = parseInt(patternHeightInput.value);
+            const tileSize = parseFloat(tileSizeInput.value);
+
+            outputCode.textContent = `# 画像 '${imageFileName}' からのキャリブレーション結果 (自動 ${patternW}x${patternH}=${patternW*patternH}点)
+import numpy as np
+import cv2
+
+# チェスボードの内側の角の数
+PATTERN_SIZE = (${patternW}, ${patternH})
+
+# 元画像から自動計算されたピクセル座標 (${patternW*patternH}点)
+# NOTE: これは手動クリックした四隅から計算した近似値です。
+# より高い精度を求めるには、以下のOpenCVの関数を使ってください。
+source_points = np.float32(${srcPointsStr})
+
+# 対応する物理座標 (cm)
+physical_points = np.float32(${dstPointsStr})
+
+# 【最高精度】OpenCVのチェスボード検出関数を使うことを強く推奨します
+# 1. 画像をグレースケールに変換
+# gray_image = cv2.cvtColor(original_image, cv2.COLOR_BGR2GRAY)
+# 2. チェスボードの角を検出
+# found, corners = cv2.findChessboardCorners(gray_image, PATTERN_SIZE, None)
+# if found:
+#     # cornersが高精度なsource_pointsになります
+#     # cv2.cornerSubPix(gray_image, corners, (11, 11), (-1, -1), criteria) で更に精度を向上できます
+#
+#     # 物理座標のグリッドを生成
+#     objp = np.zeros((${patternW}*${patternH}, 3), np.float32)
+#     objp[:,:2] = np.mgrid[0:${patternW},0:${patternH}].T.reshape(-1,2)
+#     objp = objp * ${tileSize} # cm単位に変換
+#
+#     # 高精度な行列を計算
+#     homography_matrix, status = cv2.findHomography(corners, objp)
+# else:
+#     print("チェスボードが検出できませんでした。手動計算した値を使います。")
+#     homography_matrix, status = cv2.findHomography(source_points, physical_points)
+
+# このツールで計算した点群を使って行列を計算する場合
+homography_matrix, status = cv2.findHomography(source_points, physical_points)
+# --- 計算結果の出力 ---
+print("■ ホモグラフィー行列 (GUIツールに貼り付けてください):")
+    print(homography_matrix)
+    print("\n■ 出力サイズ (GUIツールに入力してください):")
+    output_width = destination_points[1][0]
+    output_height = destination_points[2][1]
+    print(f"幅: {int(output_width)}")
+    print(f"高さ: {int(output_height)}")
+`;
+        }
+
+    </script>
+
+</body>
+</html>
+
